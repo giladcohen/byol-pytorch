@@ -208,7 +208,7 @@ class BYOL(nn.Module):
         self.to(device)
 
         # send a mock image tensor to instantiate singleton parameters
-        self.forward(torch.randn(2, 3, image_size, image_size, device=device))
+        self.forward(torch.randn(4, 3, image_size, image_size, device=device))
 
     @singleton('target_encoder')
     def _get_target_encoder(self):
@@ -226,10 +226,13 @@ class BYOL(nn.Module):
         update_moving_average(self.target_ema_updater, self.target_encoder, self.online_encoder)
 
     def forward(self, x, return_embedding = False):
-        if return_embedding:
-            return self.online_encoder(x, True)
+        #if return_embedding:
+        #    return self.online_encoder(x, True)
 
-        image_one, image_two = self.augment1(x), self.augment2(x)
+        # image_one, image_two = self.augment1(x), self.augment2(x)
+        num_x = x.size(0)
+        assert num_x % 2 == 0, 'x input must be even'
+        image_one, image_two = x.split(int(num_x/2), dim=0)
 
         online_proj_one, _ = self.online_encoder(image_one)
         online_proj_two, _ = self.online_encoder(image_two)
