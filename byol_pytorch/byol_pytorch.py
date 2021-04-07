@@ -105,24 +105,24 @@ class NetWrapper(nn.Module):
         self.hidden = {}
         self.hook_registered = False
 
-    def _find_layer(self):
-        if type(self.layer) == str:
-            modules = dict([*self.net.named_modules()])
-            return modules.get(self.layer, None)
-        elif type(self.layer) == int:
-            children = [*self.net.children()]
-            return children[self.layer]
-        return None
-
-    def _hook(self, _, input, output):
-        device = input[0].device
-        self.hidden[device] = flatten(output)
-
-    def _register_hook(self):
-        layer = self._find_layer()
-        assert layer is not None, f'hidden layer ({self.layer}) not found'
-        handle = layer.register_forward_hook(self._hook)
-        self.hook_registered = True
+    # def _find_layer(self):
+    #     if type(self.layer) == str:
+    #         modules = dict([*self.net.named_modules()])
+    #         return modules.get(self.layer, None)
+    #     elif type(self.layer) == int:
+    #         children = [*self.net.children()]
+    #         return children[self.layer]
+    #     return None
+    #
+    # def _hook(self, _, input, output):
+    #     device = input[0].device
+    #     self.hidden[device] = flatten(output)
+    #
+    # def _register_hook(self):
+    #     layer = self._find_layer()
+    #     assert layer is not None, f'hidden layer ({self.layer}) not found'
+    #     handle = layer.register_forward_hook(self._hook)
+    #     self.hook_registered = True
 
     @singleton('projector')
     def _get_projector(self, hidden):
@@ -130,33 +130,31 @@ class NetWrapper(nn.Module):
         projector = MLP(dim, self.projection_size, self.projection_hidden_size)
         return projector.to(hidden)
 
-    def get_representation(self, x):
-        if self.layer == -1:
-            return self.net(x)
+    # def get_representation(self, x):
+    #     if self.layer == -1:
+    #         return self.net(x)
+    #
+    #     if not self.hook_registered:
+    #         self._register_hook()
+    #
+    #     self.hidden.clear()
+    #     _ = self.net(x)
+    #     hidden = self.hidden[x.device]
+    #     self.hidden.clear()
+    #
+    #     assert hidden is not None, f'hidden layer {self.layer} never emitted an output'
+    #     return hidden
 
-        if not self.hook_registered:
-            self._register_hook()
-
-        self.hidden.clear()
-        _ = self.net(x)
-        hidden = self.hidden[x.device]
-        self.hidden.clear()
-
-        assert hidden is not None, f'hidden layer {self.layer} never emitted an output'
-        return hidden
-
-    def forward(self, x, return_embedding = False):
-        representation = self.get_representation(x)
-
-        if return_embedding:
-            return representation
+    def forward(self, x):
+        out = self.net(x)
+        representation, logits = out['embeddings'], out['logits']
 
         projector = self._get_projector(representation)
         projection = projector(representation)
-        return projection, representation
+
+        return projection, representation, logits
 
 # main class
-
 class BYOL(nn.Module):
     def __init__(
         self,
@@ -225,7 +223,7 @@ class BYOL(nn.Module):
         assert self.target_encoder is not None, 'target encoder has not been created yet'
         update_moving_average(self.target_ema_updater, self.target_encoder, self.online_encoder)
 
-    def forward(self, x, return_embedding=False):
+    def forward(self, x):
         #if return_embedding:
         #    return self.online_encoder(x, True)
 
@@ -234,16 +232,16 @@ class BYOL(nn.Module):
         assert num_x % 2 == 0, 'x input must be even'
         image_one, image_two = x.split(int(num_x/2), dim=0)
 
-        online_proj_one, _ = self.online_encoder(image_one)
-        online_proj_two, _ = self.online_encoder(image_two)
+        online_proj_one, _, online_logits_one = self.online_encoder(image_one)
+        online_proj_two, _, online_logits_two = self.online_encoder(image_two)
 
         online_pred_one = self.online_predictor(online_proj_one)
         online_pred_two = self.online_predictor(online_proj_two)
 
         with torch.no_grad():
             target_encoder = self._get_target_encoder() if self.use_momentum else self.online_encoder
-            target_proj_one, _ = target_encoder(image_one)
-            target_proj_two, _ = target_encoder(image_two)
+            target_proj_one, _, target_logits_one = target_encoder(image_one)
+            target_proj_two, _, target_logits_two = target_encoder(image_two)
             target_proj_one.detach_()
             target_proj_two.detach_()
 
@@ -251,7 +249,6 @@ class BYOL(nn.Module):
         loss_two = loss_fn(online_pred_two, target_proj_one.detach())
 
         loss = loss_one + loss_two
-        # if return_embedding:
-        #     return loss.sum(), torch.vstack((online_proj_one, online_proj_two)).detach()
-        # else:
-        return loss.sum()
+        return loss.sum(),\
+               torch.vstack((online_logits_one, online_logits_two)),\
+               torch.vstack((target_logits_one, target_logits_two))
