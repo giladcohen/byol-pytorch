@@ -251,4 +251,4 @@ class BYOL(nn.Module):
         loss = loss_one + loss_two
         return loss.sum(),\
                torch.vstack((online_logits_one, online_logits_two)),\
-               torch.vstack((target_logits_one, target_logits_two))
+               torch.vstack((target_logits_one, target_logits_two)).detach()
