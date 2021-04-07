@@ -225,7 +225,7 @@ class BYOL(nn.Module):
         assert self.target_encoder is not None, 'target encoder has not been created yet'
         update_moving_average(self.target_ema_updater, self.target_encoder, self.online_encoder)
 
-    def forward(self, x, return_embedding = False):
+    def forward(self, x, return_embedding=False):
         #if return_embedding:
         #    return self.online_encoder(x, True)
 
@@ -251,4 +251,7 @@ class BYOL(nn.Module):
         loss_two = loss_fn(online_pred_two, target_proj_one.detach())
 
         loss = loss_one + loss_two
-        return loss.mean()
+        # if return_embedding:
+        #     return loss.sum(), torch.vstack((online_proj_one, online_proj_two)).detach()
+        # else:
+        return loss.sum()
